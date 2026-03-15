@@ -182,22 +182,18 @@ The recommended split is `split1`.
 
 ## Recommended Default Configuration
 
-The current defaults are tuned for **quick iteration** on a single RTX 4060 laptop GPU:
+The current defaults are tuned for a **stronger single-GPU run** on a single RTX 4060 laptop GPU:
 
-- `batch_size=64`
-- `epochs=20`
-- `num_points=512`
+- `batch_size=128`
+- `epochs=40`
+- `num_points=1024`
+- `learning_rate=2e-3`
 - `num_workers=4`
 - `AMP enabled`
 - shared lightweight encoder
 - small domain embedding
 
 If you need exact full-precision behavior for debugging, add `--no_amp`.
-
-If you want a slightly stronger but slower setting, a simple upgrade is:
-
-- `epochs=40`
-- `num_points=1024`
 
 ## Usage
 
@@ -234,9 +230,7 @@ Override only what you need, for example:
 ```bash
 uv run minippt-train \
   --mode train_joint_pdnorm \
-  --epochs 40 \
-  --batch_size 96 \
-  --num_points 1024
+  --batch_size 256
 ```
 
 ## Evaluation
@@ -245,7 +239,7 @@ Evaluate both validation domains:
 
 ```bash
 uv run minippt-eval \
-  --checkpoint runs/train_joint_pdnorm_pts512_bs64_ep20_seed42/best.pt \
+  --checkpoint runs/train_joint_pdnorm_pts1024_bs128_ep40_seed42/best.pt \
   --domains both
 ```
 
@@ -253,7 +247,7 @@ Evaluate only one validation domain:
 
 ```bash
 uv run minippt-eval \
-  --checkpoint runs/train_joint_naive_pts512_bs64_ep20_seed42/best.pt \
+  --checkpoint runs/train_joint_naive_pts1024_bs128_ep40_seed42/best.pt \
   --domains modelnet
 ```
 

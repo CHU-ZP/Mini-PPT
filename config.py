@@ -27,10 +27,10 @@ class ExperimentConfig:
     output_root: str = "runs"
     mode: str = "train_joint_pdnorm"
     epochs: int = 40 
-    batch_size: int = 64
+    batch_size: int = 128
     num_workers: int = 4
-    num_points: int = 512
-    learning_rate: float = 1e-3
+    num_points: int = 1024
+    learning_rate: float = 2e-3
     weight_decay: float = 1e-4
     emb_dim: int = 16
     dropout: float = 0.3
