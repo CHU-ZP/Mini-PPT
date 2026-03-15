@@ -61,6 +61,8 @@ def main():
         emb_dim=cfg.emb_dim,
         use_pdnorm=use_pdnorm(cfg.mode),
         dropout=cfg.dropout,
+        use_semantic_alignment=cfg.semantic_alignment,
+        semantic_embedding_dim=cfg.semantic_embedding_dim,
     ).to(device)
     model.load_state_dict(checkpoint["model_state"])
     model.eval()
@@ -69,7 +71,7 @@ def main():
         modelnet_root=cfg.modelnet_root,
         scanobjectnn_root=cfg.scanobjectnn_root,
         num_points=cfg.num_points,
-        use_cache=args.cache_data,
+        use_cache=False,
     )
     name_to_dataset = {
         "modelnet": datasets["val_modelnet"],
@@ -99,6 +101,7 @@ def main():
 
     print(f"Checkpoint: {args.checkpoint}")
     print(f"Mode: {cfg.mode}")
+    print(f"Semantic alignment: {cfg.semantic_alignment}")
     for name, value in metrics.items():
         print(f"{name}: {value:.4f}")
 

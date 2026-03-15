@@ -38,6 +38,13 @@ class ExperimentConfig:
     cache_data: bool = False
     device: str = "cuda"
     amp: bool = True
+    semantic_alignment: bool = False
+    semantic_embedding_dim: int = 384
+    semantic_weight: float = 0.2
+    semantic_temperature: float = 0.07
+    text_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
+    text_prompt_template: str = "a 3d point cloud of a {}"
+    text_cache_dir: str = "artifacts/text_cache"
     exp_name: str = ""
 
     def to_dict(self):
@@ -60,4 +67,6 @@ def default_run_name(cfg: ExperimentConfig) -> str:
     mode = canonical_mode(cfg.mode)
     if cfg.exp_name:
         return cfg.exp_name
+    if cfg.semantic_alignment:
+        mode = f"{mode}_semantic"
     return f"{mode}_pts{cfg.num_points}_bs{cfg.batch_size}_ep{cfg.epochs}_seed{cfg.seed}"

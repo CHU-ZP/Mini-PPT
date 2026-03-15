@@ -57,6 +57,8 @@ def plot_history(history: dict, save_path):
     fig, axes = plt.subplots(1, 2, figsize=(11, 4))
 
     axes[0].plot(epochs, history["train_loss"], label="train loss", color="#1f77b4")
+    if "semantic_loss" in history and len(history["semantic_loss"]) == len(epochs):
+        axes[0].plot(epochs, history["semantic_loss"], label="semantic loss", color="#9467bd")
     axes[0].set_xlabel("epoch")
     axes[0].set_ylabel("loss")
     axes[0].set_title("Training Loss")

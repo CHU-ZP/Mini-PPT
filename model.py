@@ -63,6 +63,20 @@ class ClassificationHead(nn.Module):
         return self.layers(features)
 
 
+class SemanticProjectionHead(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(in_channels, in_channels),
+            nn.BatchNorm1d(in_channels),
+            nn.ReLU(inplace=True),
+            nn.Linear(in_channels, out_channels),
+        )
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        return self.layers(features)
+
+
 class PointNetClassifier(nn.Module):
     def __init__(
         self,
@@ -71,11 +85,15 @@ class PointNetClassifier(nn.Module):
         use_pdnorm: bool = False,
         dropout: float = 0.3,
         num_domains: int = 2,
+        use_semantic_alignment: bool = False,
+        semantic_embedding_dim: int = 384,
     ):
         super().__init__()
         self.use_pdnorm = use_pdnorm
         self.num_domains = num_domains
         self.num_classes_by_domain = list(num_classes_by_domain)
+        self.use_semantic_alignment = use_semantic_alignment
+        self.semantic_embedding_dim = semantic_embedding_dim
 
         if use_pdnorm:
             self.domain_embedding = nn.Embedding(num_domains, emb_dim)
@@ -88,6 +106,10 @@ class PointNetClassifier(nn.Module):
         self.heads = nn.ModuleList(
             [ClassificationHead(256, num_classes, dropout=dropout) for num_classes in self.num_classes_by_domain]
         )
+        if use_semantic_alignment:
+            self.semantic_head = SemanticProjectionHead(256, semantic_embedding_dim)
+        else:
+            self.semantic_head = None
 
     def forward_features(self, points: torch.Tensor, domain_ids: torch.Tensor) -> torch.Tensor:
         domain_emb = None
@@ -101,7 +123,7 @@ class PointNetClassifier(nn.Module):
         x = self.block3(x, domain_emb)
         return torch.max(x, dim=2).values
 
-    def forward(self, points: torch.Tensor, domain_ids: torch.Tensor):
+    def forward_outputs(self, points: torch.Tensor, domain_ids: torch.Tensor):
         if domain_ids is None:
             raise ValueError("domain_ids are required for decoupled heads.")
 
@@ -110,4 +132,13 @@ class PointNetClassifier(nn.Module):
         for domain_idx in torch.unique(domain_ids).tolist():
             mask = domain_ids == int(domain_idx)
             logits_by_domain[int(domain_idx)] = self.heads[int(domain_idx)](features[mask])
-        return logits_by_domain
+        outputs = {
+            "features": features,
+            "logits_by_domain": logits_by_domain,
+        }
+        if self.semantic_head is not None:
+            outputs["semantic_features"] = self.semantic_head(features)
+        return outputs
+
+    def forward(self, points: torch.Tensor, domain_ids: torch.Tensor):
+        return self.forward_outputs(points, domain_ids)["logits_by_domain"]

@@ -9,6 +9,7 @@ This version uses a **decoupled two-head setup**:
 - one optional Prompt-Driven Normalization (PDNorm) module
 - one classifier head for `ModelNet40`
 - one classifier head for `ScanObjectNN`
+- one optional language-guided semantic alignment branch with dataset-restricted InfoNCE negatives
 
 The goal is to study whether **domain-conditioned normalization** helps joint training under a real dataset gap, without reproducing the full PPT system.
 
@@ -18,14 +19,14 @@ The goal is to study whether **domain-conditioned normalization** helps joint tr
 - a shared PointNet-style encoder
 - dataset-conditioned PDNorm
 - decoupled dataset-specific classifier heads
+- optional semantic alignment to frozen text prototypes
 - two-domain joint training with:
   - `ModelNet40`
   - `ScanObjectNN`
 
 ## What This Project Does Not Implement
 
-- CLIP
-- language-guided categorical alignment
+- CLIP image encoder
 - semantic segmentation
 - large research frameworks such as Pointcept
 - full paper-level reproduction
@@ -45,6 +46,8 @@ Unlike the earlier shared-class prototype, this version keeps the **full label s
 - `ScanObjectNN head`: 15-way classification
 
 During joint training, each sample uses the head that matches its dataset. This avoids hand-crafted shared-category alignment and is much closer to the paper's `Decoupled` ablation setting.
+
+An optional extension also adds **language-guided semantic alignment**: the shared 3D feature is projected into a frozen text embedding space, and an InfoNCE loss is computed with **dataset-restricted negatives**, meaning each sample only contrasts against class text prototypes from its own dataset.
 
 ## Training Modes
 
@@ -274,6 +277,14 @@ Override only what you need, for example:
 uv run minippt-train \
   --mode train_joint_pdnorm \
   --batch_size 256
+```
+
+To keep the decoupled classification heads and add semantic alignment on top:
+
+```bash
+uv run minippt-train \
+  --mode train_joint_pdnorm \
+  --semantic_alignment
 ```
 
 ## Evaluation

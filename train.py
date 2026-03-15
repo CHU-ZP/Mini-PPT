@@ -5,6 +5,7 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
@@ -25,6 +26,7 @@ def build_parser():
     parser.add_argument("--epochs", type=int, default=cfg.epochs)
     parser.add_argument("--batch_size", type=int, default=cfg.batch_size)
     parser.add_argument("--num_points", type=int, default=cfg.num_points)
+    parser.add_argument("--semantic_alignment", action="store_true", default=cfg.semantic_alignment)
     parser.add_argument("--no_amp", dest="amp", action="store_false")
     parser.add_argument("--exp_name", type=str, default=cfg.exp_name)
     parser.set_defaults(amp=cfg.amp)
@@ -51,6 +53,13 @@ def args_to_config(args):
         device=cfg.device,
         scanobjectnn_variant=cfg.scanobjectnn_variant,
         amp=args.amp,
+        semantic_alignment=args.semantic_alignment,
+        semantic_embedding_dim=cfg.semantic_embedding_dim,
+        semantic_weight=cfg.semantic_weight,
+        semantic_temperature=cfg.semantic_temperature,
+        text_model_name=cfg.text_model_name,
+        text_prompt_template=cfg.text_prompt_template,
+        text_cache_dir=cfg.text_cache_dir,
         exp_name=args.exp_name,
     )
 
@@ -107,6 +116,33 @@ def make_loaders(cfg: ExperimentConfig):
     return train_loader, val_loaders, datasets
 
 
+def format_class_prompts(domain_class_names: dict[str, list[str]], template: str) -> dict[str, list[str]]:
+    prompts = {}
+    for domain_name, class_names in domain_class_names.items():
+        prompts[domain_name] = [template.format(class_name.replace("_", " ")) for class_name in class_names]
+    return prompts
+
+
+def build_text_prototypes(cfg: ExperimentConfig, domain_class_names: dict[str, list[str]]):
+    if not cfg.semantic_alignment:
+        return None, None
+
+    from text_encoder import FrozenTextEmbedder
+
+    prompted_class_names = format_class_prompts(domain_class_names, cfg.text_prompt_template)
+    encoder = FrozenTextEmbedder(model_name=cfg.text_model_name, device="cpu")
+
+    text_embeddings_by_domain = {}
+    for domain_name, prompts in prompted_class_names.items():
+        cache_path = encoder.default_cache_path(prompts, cfg.text_cache_dir, prefix=f"{domain_name}_semantic")
+        embeddings = encoder.encode_with_cache(prompts, cache_path)
+        text_embeddings_by_domain[DOMAIN_TO_ID[domain_name]] = F.normalize(embeddings.float(), dim=1)
+
+    first_embedding = next(iter(text_embeddings_by_domain.values()))
+    cfg.semantic_embedding_dim = int(first_embedding.shape[1])
+    return text_embeddings_by_domain, prompted_class_names
+
+
 def decoupled_cross_entropy(logits_by_domain, labels, domain_ids, criterion):
     total_count = labels.numel()
     total_loss = labels.new_zeros((), dtype=torch.float32)
@@ -119,15 +155,55 @@ def decoupled_cross_entropy(logits_by_domain, labels, domain_ids, criterion):
     return total_loss / max(total_count, 1)
 
 
+def semantic_info_nce_loss(
+    semantic_features: torch.Tensor | None,
+    labels: torch.Tensor,
+    domain_ids: torch.Tensor,
+    text_embeddings_by_domain,
+    temperature: float,
+):
+    if semantic_features is None or text_embeddings_by_domain is None:
+        return labels.new_zeros((), dtype=torch.float32)
+
+    features = F.normalize(semantic_features.float(), dim=1)
+    total_count = labels.numel()
+    total_loss = features.new_zeros(())
+
+    for domain_idx, text_embeddings in text_embeddings_by_domain.items():
+        mask = domain_ids == int(domain_idx)
+        if mask.sum().item() == 0:
+            continue
+        domain_features = features[mask]
+        domain_labels = labels[mask]
+        domain_text_embeddings = text_embeddings.to(domain_features.device, non_blocking=True)
+        logits = domain_features @ domain_text_embeddings.T
+        logits = logits / temperature
+        total_loss = total_loss + F.cross_entropy(logits, domain_labels) * domain_labels.numel()
+
+    return total_loss / max(total_count, 1)
+
+
 def get_autocast_context(device: torch.device, use_amp: bool):
     if use_amp and device.type == "cuda":
         return torch.autocast(device_type="cuda", dtype=torch.float16)
     return nullcontext()
 
 
-def train_one_epoch(model, loader, optimizer, criterion, device, scaler, use_amp: bool):
+def train_one_epoch(
+    model,
+    loader,
+    optimizer,
+    criterion,
+    device,
+    scaler,
+    use_amp: bool,
+    text_embeddings_by_domain=None,
+    semantic_weight: float = 0.0,
+    semantic_temperature: float = 0.07,
+):
     model.train()
     loss_meter = AverageMeter()
+    semantic_loss_meter = AverageMeter()
 
     for points, labels, domain_ids in tqdm(loader, desc="train", leave=False):
         points = points.to(device, non_blocking=True)
@@ -136,15 +212,27 @@ def train_one_epoch(model, loader, optimizer, criterion, device, scaler, use_amp
 
         optimizer.zero_grad(set_to_none=True)
         with get_autocast_context(device, use_amp):
-            logits_by_domain = model(points, domain_ids)
-            loss = decoupled_cross_entropy(logits_by_domain, labels, domain_ids, criterion)
+            outputs = model.forward_outputs(points, domain_ids)
+            cls_loss = decoupled_cross_entropy(outputs["logits_by_domain"], labels, domain_ids, criterion)
+            semantic_loss = semantic_info_nce_loss(
+                outputs.get("semantic_features"),
+                labels,
+                domain_ids,
+                text_embeddings_by_domain=text_embeddings_by_domain,
+                temperature=semantic_temperature,
+            )
+            loss = cls_loss + semantic_weight * semantic_loss
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
 
         loss_meter.update(loss.item(), points.size(0))
+        semantic_loss_meter.update(semantic_loss.item(), points.size(0))
 
-    return loss_meter.avg
+    return {
+        "train_loss": loss_meter.avg,
+        "semantic_loss": semantic_loss_meter.avg,
+    }
 
 
 @torch.no_grad()
@@ -176,7 +264,18 @@ def evaluate_all(model, val_loaders, device, use_amp: bool = False):
     return metrics
 
 
-def save_checkpoint(path: Path, model, optimizer, scheduler, cfg: ExperimentConfig, epoch: int, metrics: dict, domain_class_names, domain_num_classes):
+def save_checkpoint(
+    path: Path,
+    model,
+    optimizer,
+    scheduler,
+    cfg: ExperimentConfig,
+    epoch: int,
+    metrics: dict,
+    domain_class_names,
+    domain_num_classes,
+    prompted_class_names=None,
+):
     torch.save(
         {
             "model_state": model.state_dict(),
@@ -187,6 +286,7 @@ def save_checkpoint(path: Path, model, optimizer, scheduler, cfg: ExperimentConf
             "metrics": metrics,
             "domain_class_names": domain_class_names,
             "domain_num_classes": domain_num_classes,
+            "prompted_class_names": prompted_class_names,
         },
         path,
     )
@@ -206,6 +306,8 @@ def main():
     train_loader, val_loaders, datasets = make_loaders(cfg)
     domain_num_classes = datasets["domain_num_classes"]
     domain_class_names = datasets["domain_class_names"]
+    text_embeddings_by_domain, prompted_class_names = build_text_prototypes(cfg, domain_class_names)
+
     num_classes_by_domain = [
         domain_num_classes["modelnet"],
         domain_num_classes["scanobjectnn"],
@@ -216,6 +318,8 @@ def main():
         use_pdnorm=use_pdnorm(cfg.mode),
         dropout=cfg.dropout,
         num_domains=len(DOMAIN_TO_ID),
+        use_semantic_alignment=cfg.semantic_alignment,
+        semantic_embedding_dim=cfg.semantic_embedding_dim,
     ).to(device)
 
     criterion = nn.CrossEntropyLoss()
@@ -226,6 +330,7 @@ def main():
 
     history = {
         "train_loss": [],
+        "semantic_loss": [],
         "val_acc": [],
         "lr": [],
         "modelnet_acc": [],
@@ -241,16 +346,29 @@ def main():
             **cfg.to_dict(),
             "domain_class_names": domain_class_names,
             "domain_num_classes": domain_num_classes,
+            "prompted_class_names": prompted_class_names,
         },
         out_dir / "config.json",
     )
 
     for epoch in range(1, cfg.epochs + 1):
-        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, scaler, use_amp)
+        train_stats = train_one_epoch(
+            model,
+            train_loader,
+            optimizer,
+            criterion,
+            device,
+            scaler,
+            use_amp,
+            text_embeddings_by_domain=text_embeddings_by_domain,
+            semantic_weight=cfg.semantic_weight if cfg.semantic_alignment else 0.0,
+            semantic_temperature=cfg.semantic_temperature,
+        )
         metrics = evaluate_all(model, val_loaders, device, use_amp=use_amp)
         scheduler.step()
 
-        history["train_loss"].append(train_loss)
+        history["train_loss"].append(train_stats["train_loss"])
+        history["semantic_loss"].append(train_stats["semantic_loss"])
         history["val_acc"].append(metrics["val_acc"])
         history["lr"].append(optimizer.param_groups[0]["lr"])
         if "modelnet" in metrics:
@@ -260,8 +378,10 @@ def main():
 
         log_line = (
             f"Epoch {epoch:03d}/{cfg.epochs} | "
-            f"train_loss={train_loss:.4f} | val_acc={metrics['val_acc']:.4f}"
+            f"train_loss={train_stats['train_loss']:.4f} | val_acc={metrics['val_acc']:.4f}"
         )
+        if cfg.semantic_alignment:
+            log_line += f" | semantic_loss={train_stats['semantic_loss']:.4f}"
         if "modelnet" in metrics:
             log_line += f" | modelnet={metrics['modelnet']:.4f}"
         if "scanobjectnn" in metrics:
@@ -278,6 +398,7 @@ def main():
             metrics,
             domain_class_names,
             domain_num_classes,
+            prompted_class_names=prompted_class_names,
         )
         if metrics["val_acc"] > best_acc:
             best_acc = metrics["val_acc"]
@@ -292,6 +413,7 @@ def main():
                 metrics,
                 domain_class_names,
                 domain_num_classes,
+                prompted_class_names=prompted_class_names,
             )
 
         save_json(
@@ -300,6 +422,7 @@ def main():
                 "best_epoch": best_epoch,
                 "best_acc": best_acc,
                 "latest_metrics": metrics,
+                "latest_train_stats": train_stats,
                 "elapsed_seconds": time.time() - start_time,
             },
             out_dir / "summary.json",

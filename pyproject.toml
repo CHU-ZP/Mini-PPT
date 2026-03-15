@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "minippt"
 version = "0.3.0"
-description = "A minimal PPT-inspired two-dataset point cloud classification prototype for course projects."
+description = "A minimal PPT-inspired two-dataset point cloud classification prototype with optional language-guided semantic alignment."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -82,12 +82,12 @@ components = [
   "dataset embedding as domain embedding",
   "Prompt-Driven Normalization (PDNorm)",
   "decoupled dataset-specific classification heads",
+  "optional frozen-text semantic alignment with dataset-restricted InfoNCE negatives",
 ]
 
 [tool.minippt.exclude]
 components = [
-  "CLIP",
-  "language-guided categorical alignment",
+  "CLIP image encoder",
   "large-scale multi-dataset semantic segmentation",
   "Pointcept-style heavy framework design",
   "full paper reproduction",
@@ -110,6 +110,7 @@ default_num_points = 1024
 [tool.minippt.model]
 backbone = "lightweight PointNet-style encoder"
 head = "decoupled MLP classifiers"
+optional_semantic_branch = "projection head to frozen text embedding space"
 
 [tool.minippt.model.domain_embedding]
 enabled = true
@@ -150,6 +151,10 @@ dropout = 0.3
 embedding_dim = 16
 num_workers = 4
 amp = true
+semantic_alignment = false
+semantic_weight = 0.2
+semantic_temperature = 0.07
+text_model_name = "sentence-transformers/all-MiniLM-L6-v2"
 
 [tool.minippt.evaluation]
 required_metrics = [
