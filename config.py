@@ -25,7 +25,7 @@ class ExperimentConfig:
     scanobjectnn_root: str = "data/scanobjectnn_npy"
     output_root: str = "runs"
     mode: str = "train_joint_pdnorm"
-    epochs: int = 40
+    epochs: int = 50
     batch_size: int = 128
     num_workers: int = 4
     num_points: int = 1024
