@@ -2,14 +2,13 @@
 
 `miniPPT` is a minimal, runnable course-project prototype inspired by the paper *Towards Large-scale 3D Representation Learning with Multi-dataset Point Prompt Training (PPT)*.
 
-This version uses a **decoupled two-head setup**:
+This version uses a **shared encoder with switchable prediction heads**:
 
 - one shared lightweight PointNet-style encoder
 - one dataset embedding used as a domain embedding
 - one optional Prompt-Driven Normalization (PDNorm) module
-- one classifier head for `ModelNet40`
-- one classifier head for `ScanObjectNN`
-- one optional language-guided semantic alignment branch with dataset-restricted InfoNCE negatives
+- one `decoupled` prediction head option with separate classifiers for `ModelNet40` and `ScanObjectNN`
+- one `language_guided` prediction head option that projects 3D features into a frozen text space and classifies by text-prototype similarity
 
 The goal is to study whether **domain-conditioned normalization** helps joint training under a real dataset gap, without reproducing the full PPT system.
 
@@ -18,8 +17,8 @@ The goal is to study whether **domain-conditioned normalization** helps joint tr
 - 3D point cloud classification
 - a shared PointNet-style encoder
 - dataset-conditioned PDNorm
-- decoupled dataset-specific classifier heads
-- optional semantic alignment to frozen text prototypes
+- switchable `decoupled` or `language_guided` prediction heads
+- frozen text prototypes with dataset-restricted InfoNCE-style classification for the language-guided head
 - two-domain joint training with:
   - `ModelNet40`
   - `ScanObjectNN`
@@ -40,14 +39,12 @@ The repo treats the two datasets as two domains:
 
 This keeps the experiment simple while introducing a meaningful synthetic-vs-real domain gap.
 
-Unlike the earlier shared-class prototype, this version keeps the **full label space of each dataset** and uses **decoupled heads**:
+Unlike the earlier shared-class prototype, this version keeps the **full label space of each dataset** and supports two prediction-space strategies:
 
-- `ModelNet40 head`: 40-way classification
-- `ScanObjectNN head`: 15-way classification
+- `decoupled`: `ModelNet40` uses a 40-way head and `ScanObjectNN` uses a 15-way head
+- `language_guided`: a single lightweight projection head maps 3D features into a frozen text embedding space, and classification is performed by similarity to text prototypes from the current dataset
 
-During joint training, each sample uses the head that matches its dataset. This avoids hand-crafted shared-category alignment and is much closer to the paper's `Decoupled` ablation setting.
-
-An optional extension also adds **language-guided semantic alignment**: the shared 3D feature is projected into a frozen text embedding space, and an InfoNCE loss is computed with **dataset-restricted negatives**, meaning each sample only contrasts against class text prototypes from its own dataset.
+The `language_guided` option is intentionally lightweight: it does not reproduce the full paper, but it does replace the decoupled prediction heads with a text-prototype classifier and uses **dataset-restricted negatives**.
 
 ## Training Modes
 
@@ -121,7 +118,7 @@ If you want to preprocess ScanObjectNN from its official `h5` archive, install t
 uv pip install -e .[preprocess]
 ```
 
-If you want to use the standalone pretrained text embedding module, install:
+If you want to use the language-guided head or the standalone pretrained text embedding module, install:
 
 ```bash
 uv pip install -e .[text]
@@ -137,12 +134,13 @@ minippt-prepare-data --help
 
 Optional module:
 
-- `text_encoder.py`: a standalone frozen text embedding wrapper for future semantic alignment experiments
+- `text_encoder.py`: a standalone frozen text embedding wrapper used by the language-guided head and by the text-label visualization utility
 
 The training CLI intentionally keeps only the parameters you are likely to change during coursework:
 
 - dataset roots
 - training mode
+- prediction head type
 - epochs
 - batch size
 - number of points
@@ -152,7 +150,7 @@ Learning rate, workers, dropout, AMP default, and output directory are fixed in 
 
 ## Optional Text Embeddings
 
-The repo also includes a standalone pretrained text embedding wrapper in [text_encoder.py](/home/zepeng/Obsidian/ComputerScience/2MVA/NPM3d/miniPPT/text_encoder.py#L1). It does not change the current classifier, training loop, or checkpoints unless you explicitly import and use it.
+The repo also includes a standalone pretrained text embedding wrapper in [text_encoder.py](/home/zepeng/Obsidian/ComputerScience/2MVA/NPM3d/miniPPT/text_encoder.py#L1). The same encoder is reused by the optional `language_guided` head.
 
 Example:
 
@@ -271,20 +269,21 @@ uv run minippt-train \
   --mode train_joint_pdnorm
 ```
 
+### Run the True Lightweight Language-Guided Head
+
+```bash
+uv run minippt-train \
+  --mode train_joint_pdnorm \
+  --head_type language_guided
+```
+
 Override only what you need, for example:
 
 ```bash
 uv run minippt-train \
   --mode train_joint_pdnorm \
+  --head_type language_guided \
   --batch_size 256
-```
-
-To keep the decoupled classification heads and add semantic alignment on top:
-
-```bash
-uv run minippt-train \
-  --mode train_joint_pdnorm \
-  --semantic_alignment
 ```
 
 ## Evaluation
@@ -328,11 +327,13 @@ For joint training, the logs report:
 
 1. `train_modelnet_only`
 2. `train_scanobjectnn_only`
-3. `train_joint_naive`
-4. `train_joint_pdnorm`
+3. `train_joint_naive --head_type decoupled`
+4. `train_joint_pdnorm --head_type decoupled`
+5. `train_joint_naive --head_type language_guided`
+6. `train_joint_pdnorm --head_type language_guided`
 
 This gives a clean story for a course presentation:
 
 - first show the difficulty gap between the two datasets
-- then show the negative transfer of naive joint training
-- finally show whether PDNorm helps the shared encoder adapt to both domains
+- then compare `decoupled` against a true lightweight `language_guided` prediction head
+- finally show whether PDNorm helps under each prediction-space choice

@@ -85,15 +85,15 @@ class PointNetClassifier(nn.Module):
         use_pdnorm: bool = False,
         dropout: float = 0.3,
         num_domains: int = 2,
-        use_semantic_alignment: bool = False,
-        semantic_embedding_dim: int = 384,
+        head_type: str = "decoupled",
+        text_embedding_dim: int = 384,
     ):
         super().__init__()
         self.use_pdnorm = use_pdnorm
         self.num_domains = num_domains
         self.num_classes_by_domain = list(num_classes_by_domain)
-        self.use_semantic_alignment = use_semantic_alignment
-        self.semantic_embedding_dim = semantic_embedding_dim
+        self.head_type = head_type
+        self.text_embedding_dim = text_embedding_dim
 
         if use_pdnorm:
             self.domain_embedding = nn.Embedding(num_domains, emb_dim)
@@ -103,13 +103,16 @@ class PointNetClassifier(nn.Module):
         self.block1 = PointBlock(3, 64, use_pdnorm, emb_dim)
         self.block2 = PointBlock(64, 128, use_pdnorm, emb_dim)
         self.block3 = PointBlock(128, 256, use_pdnorm, emb_dim)
-        self.heads = nn.ModuleList(
-            [ClassificationHead(256, num_classes, dropout=dropout) for num_classes in self.num_classes_by_domain]
-        )
-        if use_semantic_alignment:
-            self.semantic_head = SemanticProjectionHead(256, semantic_embedding_dim)
+        if head_type == "decoupled":
+            self.heads = nn.ModuleList(
+                [ClassificationHead(256, num_classes, dropout=dropout) for num_classes in self.num_classes_by_domain]
+            )
+            self.language_guided_head = None
+        elif head_type == "language_guided":
+            self.heads = None
+            self.language_guided_head = SemanticProjectionHead(256, text_embedding_dim)
         else:
-            self.semantic_head = None
+            raise ValueError(f"Unsupported head_type: {head_type}")
 
     def forward_features(self, points: torch.Tensor, domain_ids: torch.Tensor) -> torch.Tensor:
         domain_emb = None
@@ -123,22 +126,71 @@ class PointNetClassifier(nn.Module):
         x = self.block3(x, domain_emb)
         return torch.max(x, dim=2).values
 
-    def forward_outputs(self, points: torch.Tensor, domain_ids: torch.Tensor):
-        if domain_ids is None:
-            raise ValueError("domain_ids are required for decoupled heads.")
+    def build_language_guided_logits(
+        self,
+        language_features: torch.Tensor,
+        domain_ids: torch.Tensor,
+        text_embeddings_by_domain: dict[int, torch.Tensor],
+        temperature: float = 1.0,
+    ) -> dict[int, torch.Tensor]:
+        if text_embeddings_by_domain is None:
+            raise ValueError("text_embeddings_by_domain are required for the language-guided head.")
 
-        features = self.forward_features(points, domain_ids)
+        normalized_features = F.normalize(language_features.float(), dim=1)
         logits_by_domain = {}
         for domain_idx in torch.unique(domain_ids).tolist():
             mask = domain_ids == int(domain_idx)
-            logits_by_domain[int(domain_idx)] = self.heads[int(domain_idx)](features[mask])
+            domain_text_embeddings = text_embeddings_by_domain[int(domain_idx)].to(
+                normalized_features.device,
+                non_blocking=True,
+            )
+            logits = normalized_features[mask] @ domain_text_embeddings.T
+            logits_by_domain[int(domain_idx)] = logits / temperature
+        return logits_by_domain
+
+    def forward_outputs(
+        self,
+        points: torch.Tensor,
+        domain_ids: torch.Tensor,
+        text_embeddings_by_domain: dict[int, torch.Tensor] | None = None,
+        temperature: float = 1.0,
+    ):
+        if domain_ids is None:
+            raise ValueError("domain_ids are required for dataset-aware prediction heads.")
+
+        features = self.forward_features(points, domain_ids)
         outputs = {
             "features": features,
-            "logits_by_domain": logits_by_domain,
         }
-        if self.semantic_head is not None:
-            outputs["semantic_features"] = self.semantic_head(features)
+
+        if self.head_type == "decoupled":
+            logits_by_domain = {}
+            for domain_idx in torch.unique(domain_ids).tolist():
+                mask = domain_ids == int(domain_idx)
+                logits_by_domain[int(domain_idx)] = self.heads[int(domain_idx)](features[mask])
+            outputs["logits_by_domain"] = logits_by_domain
+        else:
+            language_features = self.language_guided_head(features)
+            outputs["language_features"] = language_features
+            if text_embeddings_by_domain is not None:
+                outputs["logits_by_domain"] = self.build_language_guided_logits(
+                    language_features,
+                    domain_ids,
+                    text_embeddings_by_domain=text_embeddings_by_domain,
+                    temperature=temperature,
+                )
         return outputs
 
-    def forward(self, points: torch.Tensor, domain_ids: torch.Tensor):
-        return self.forward_outputs(points, domain_ids)["logits_by_domain"]
+    def forward(
+        self,
+        points: torch.Tensor,
+        domain_ids: torch.Tensor,
+        text_embeddings_by_domain: dict[int, torch.Tensor] | None = None,
+        temperature: float = 1.0,
+    ):
+        return self.forward_outputs(
+            points,
+            domain_ids,
+            text_embeddings_by_domain=text_embeddings_by_domain,
+            temperature=temperature,
+        )

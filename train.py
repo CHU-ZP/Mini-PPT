@@ -11,7 +11,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from config import ExperimentConfig, MODES, canonical_mode, default_run_name, use_pdnorm
+from config import HEAD_TYPES, ExperimentConfig, MODES, canonical_mode, default_run_name, use_pdnorm, uses_language_guided_head
 from dataset import DOMAIN_TO_ID, build_datasets, collate_point_cloud_batch
 from model import PointNetClassifier
 from utils import AverageMeter, choose_device, plot_history, prepare_output_dir, save_json, seed_everything
@@ -26,7 +26,7 @@ def build_parser():
     parser.add_argument("--epochs", type=int, default=cfg.epochs)
     parser.add_argument("--batch_size", type=int, default=cfg.batch_size)
     parser.add_argument("--num_points", type=int, default=cfg.num_points)
-    parser.add_argument("--semantic_alignment", action="store_true", default=cfg.semantic_alignment)
+    parser.add_argument("--head_type", type=str, choices=HEAD_TYPES, default=cfg.head_type)
     parser.add_argument("--no_amp", dest="amp", action="store_false")
     parser.add_argument("--exp_name", type=str, default=cfg.exp_name)
     parser.set_defaults(amp=cfg.amp)
@@ -53,10 +53,9 @@ def args_to_config(args):
         device=cfg.device,
         scanobjectnn_variant=cfg.scanobjectnn_variant,
         amp=args.amp,
-        semantic_alignment=args.semantic_alignment,
-        semantic_embedding_dim=cfg.semantic_embedding_dim,
-        semantic_weight=cfg.semantic_weight,
-        semantic_temperature=cfg.semantic_temperature,
+        head_type=args.head_type,
+        text_embedding_dim=cfg.text_embedding_dim,
+        language_guided_temperature=cfg.language_guided_temperature,
         text_model_name=cfg.text_model_name,
         text_prompt_template=cfg.text_prompt_template,
         text_cache_dir=cfg.text_cache_dir,
@@ -124,7 +123,7 @@ def format_class_prompts(domain_class_names: dict[str, list[str]], template: str
 
 
 def build_text_prototypes(cfg: ExperimentConfig, domain_class_names: dict[str, list[str]]):
-    if not cfg.semantic_alignment:
+    if not uses_language_guided_head(cfg.head_type):
         return None, None
 
     from text_encoder import FrozenTextEmbedder
@@ -134,16 +133,16 @@ def build_text_prototypes(cfg: ExperimentConfig, domain_class_names: dict[str, l
 
     text_embeddings_by_domain = {}
     for domain_name, prompts in prompted_class_names.items():
-        cache_path = encoder.default_cache_path(prompts, cfg.text_cache_dir, prefix=f"{domain_name}_semantic")
+        cache_path = encoder.default_cache_path(prompts, cfg.text_cache_dir, prefix=f"{domain_name}_language_guided")
         embeddings = encoder.encode_with_cache(prompts, cache_path)
         text_embeddings_by_domain[DOMAIN_TO_ID[domain_name]] = F.normalize(embeddings.float(), dim=1)
 
     first_embedding = next(iter(text_embeddings_by_domain.values()))
-    cfg.semantic_embedding_dim = int(first_embedding.shape[1])
+    cfg.text_embedding_dim = int(first_embedding.shape[1])
     return text_embeddings_by_domain, prompted_class_names
 
 
-def decoupled_cross_entropy(logits_by_domain, labels, domain_ids, criterion):
+def classification_cross_entropy(logits_by_domain, labels, domain_ids, criterion):
     total_count = labels.numel()
     total_loss = labels.new_zeros((), dtype=torch.float32)
     for domain_idx, logits in logits_by_domain.items():
@@ -152,34 +151,6 @@ def decoupled_cross_entropy(logits_by_domain, labels, domain_ids, criterion):
         if domain_labels.numel() == 0:
             continue
         total_loss = total_loss + criterion(logits, domain_labels) * domain_labels.numel()
-    return total_loss / max(total_count, 1)
-
-
-def semantic_info_nce_loss(
-    semantic_features: torch.Tensor | None,
-    labels: torch.Tensor,
-    domain_ids: torch.Tensor,
-    text_embeddings_by_domain,
-    temperature: float,
-):
-    if semantic_features is None or text_embeddings_by_domain is None:
-        return labels.new_zeros((), dtype=torch.float32)
-
-    features = F.normalize(semantic_features.float(), dim=1)
-    total_count = labels.numel()
-    total_loss = features.new_zeros(())
-
-    for domain_idx, text_embeddings in text_embeddings_by_domain.items():
-        mask = domain_ids == int(domain_idx)
-        if mask.sum().item() == 0:
-            continue
-        domain_features = features[mask]
-        domain_labels = labels[mask]
-        domain_text_embeddings = text_embeddings.to(domain_features.device, non_blocking=True)
-        logits = domain_features @ domain_text_embeddings.T
-        logits = logits / temperature
-        total_loss = total_loss + F.cross_entropy(logits, domain_labels) * domain_labels.numel()
-
     return total_loss / max(total_count, 1)
 
 
@@ -197,13 +168,12 @@ def train_one_epoch(
     device,
     scaler,
     use_amp: bool,
+    head_type: str,
     text_embeddings_by_domain=None,
-    semantic_weight: float = 0.0,
-    semantic_temperature: float = 0.07,
+    language_guided_temperature: float = 0.07,
 ):
     model.train()
     loss_meter = AverageMeter()
-    semantic_loss_meter = AverageMeter()
 
     for points, labels, domain_ids in tqdm(loader, desc="train", leave=False):
         points = points.to(device, non_blocking=True)
@@ -212,31 +182,32 @@ def train_one_epoch(
 
         optimizer.zero_grad(set_to_none=True)
         with get_autocast_context(device, use_amp):
-            outputs = model.forward_outputs(points, domain_ids)
-            cls_loss = decoupled_cross_entropy(outputs["logits_by_domain"], labels, domain_ids, criterion)
-            semantic_loss = semantic_info_nce_loss(
-                outputs.get("semantic_features"),
-                labels,
+            outputs = model.forward_outputs(
+                points,
                 domain_ids,
-                text_embeddings_by_domain=text_embeddings_by_domain,
-                temperature=semantic_temperature,
+                text_embeddings_by_domain=text_embeddings_by_domain if uses_language_guided_head(head_type) else None,
+                temperature=language_guided_temperature,
             )
-            loss = cls_loss + semantic_weight * semantic_loss
+            cls_loss = classification_cross_entropy(outputs["logits_by_domain"], labels, domain_ids, criterion)
+            loss = cls_loss
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
 
         loss_meter.update(loss.item(), points.size(0))
-        semantic_loss_meter.update(semantic_loss.item(), points.size(0))
-
-    return {
-        "train_loss": loss_meter.avg,
-        "semantic_loss": semantic_loss_meter.avg,
-    }
+    return {"train_loss": loss_meter.avg}
 
 
 @torch.no_grad()
-def evaluate_loader(model, loader, device, use_amp: bool = False):
+def evaluate_loader(
+    model,
+    loader,
+    device,
+    use_amp: bool = False,
+    head_type: str = "decoupled",
+    text_embeddings_by_domain=None,
+    language_guided_temperature: float = 0.07,
+):
     model.eval()
     correct = 0
     total = 0
@@ -246,7 +217,13 @@ def evaluate_loader(model, loader, device, use_amp: bool = False):
         domain_ids = domain_ids.to(device, non_blocking=True)
 
         with get_autocast_context(device, use_amp):
-            logits_by_domain = model(points, domain_ids)
+            outputs = model.forward_outputs(
+                points,
+                domain_ids,
+                text_embeddings_by_domain=text_embeddings_by_domain if uses_language_guided_head(head_type) else None,
+                temperature=language_guided_temperature,
+            )
+            logits_by_domain = outputs["logits_by_domain"]
         for domain_idx, logits in logits_by_domain.items():
             mask = domain_ids == int(domain_idx)
             domain_labels = labels[mask]
@@ -256,10 +233,26 @@ def evaluate_loader(model, loader, device, use_amp: bool = False):
     return correct / max(total, 1)
 
 
-def evaluate_all(model, val_loaders, device, use_amp: bool = False):
+def evaluate_all(
+    model,
+    val_loaders,
+    device,
+    use_amp: bool = False,
+    head_type: str = "decoupled",
+    text_embeddings_by_domain=None,
+    language_guided_temperature: float = 0.07,
+):
     metrics = {}
     for name, loader in val_loaders.items():
-        metrics[name] = evaluate_loader(model, loader, device, use_amp=use_amp)
+        metrics[name] = evaluate_loader(
+            model,
+            loader,
+            device,
+            use_amp=use_amp,
+            head_type=head_type,
+            text_embeddings_by_domain=text_embeddings_by_domain,
+            language_guided_temperature=language_guided_temperature,
+        )
     metrics["val_acc"] = sum(metrics.values()) / len(metrics)
     return metrics
 
@@ -275,6 +268,7 @@ def save_checkpoint(
     domain_class_names,
     domain_num_classes,
     prompted_class_names=None,
+    text_embeddings_by_domain=None,
 ):
     torch.save(
         {
@@ -287,6 +281,9 @@ def save_checkpoint(
             "domain_class_names": domain_class_names,
             "domain_num_classes": domain_num_classes,
             "prompted_class_names": prompted_class_names,
+            "text_embeddings_by_domain": {
+                int(domain_idx): embeddings.cpu() for domain_idx, embeddings in (text_embeddings_by_domain or {}).items()
+            },
         },
         path,
     )
@@ -318,8 +315,8 @@ def main():
         use_pdnorm=use_pdnorm(cfg.mode),
         dropout=cfg.dropout,
         num_domains=len(DOMAIN_TO_ID),
-        use_semantic_alignment=cfg.semantic_alignment,
-        semantic_embedding_dim=cfg.semantic_embedding_dim,
+        head_type=cfg.head_type,
+        text_embedding_dim=cfg.text_embedding_dim,
     ).to(device)
 
     criterion = nn.CrossEntropyLoss()
@@ -330,7 +327,6 @@ def main():
 
     history = {
         "train_loss": [],
-        "semantic_loss": [],
         "val_acc": [],
         "lr": [],
         "modelnet_acc": [],
@@ -360,15 +356,22 @@ def main():
             device,
             scaler,
             use_amp,
+            head_type=cfg.head_type,
             text_embeddings_by_domain=text_embeddings_by_domain,
-            semantic_weight=cfg.semantic_weight if cfg.semantic_alignment else 0.0,
-            semantic_temperature=cfg.semantic_temperature,
+            language_guided_temperature=cfg.language_guided_temperature,
         )
-        metrics = evaluate_all(model, val_loaders, device, use_amp=use_amp)
+        metrics = evaluate_all(
+            model,
+            val_loaders,
+            device,
+            use_amp=use_amp,
+            head_type=cfg.head_type,
+            text_embeddings_by_domain=text_embeddings_by_domain,
+            language_guided_temperature=cfg.language_guided_temperature,
+        )
         scheduler.step()
 
         history["train_loss"].append(train_stats["train_loss"])
-        history["semantic_loss"].append(train_stats["semantic_loss"])
         history["val_acc"].append(metrics["val_acc"])
         history["lr"].append(optimizer.param_groups[0]["lr"])
         if "modelnet" in metrics:
@@ -380,8 +383,6 @@ def main():
             f"Epoch {epoch:03d}/{cfg.epochs} | "
             f"train_loss={train_stats['train_loss']:.4f} | val_acc={metrics['val_acc']:.4f}"
         )
-        if cfg.semantic_alignment:
-            log_line += f" | semantic_loss={train_stats['semantic_loss']:.4f}"
         if "modelnet" in metrics:
             log_line += f" | modelnet={metrics['modelnet']:.4f}"
         if "scanobjectnn" in metrics:
@@ -399,6 +400,7 @@ def main():
             domain_class_names,
             domain_num_classes,
             prompted_class_names=prompted_class_names,
+            text_embeddings_by_domain=text_embeddings_by_domain,
         )
         if metrics["val_acc"] > best_acc:
             best_acc = metrics["val_acc"]
@@ -414,6 +416,7 @@ def main():
                 domain_class_names,
                 domain_num_classes,
                 prompted_class_names=prompted_class_names,
+                text_embeddings_by_domain=text_embeddings_by_domain,
             )
 
         save_json(
@@ -430,7 +433,15 @@ def main():
         plot_history(history, out_dir / "curves.png")
         save_json(history, out_dir / "history.json")
 
-    final_metrics = evaluate_all(model, val_loaders, device, use_amp=use_amp)
+    final_metrics = evaluate_all(
+        model,
+        val_loaders,
+        device,
+        use_amp=use_amp,
+        head_type=cfg.head_type,
+        text_embeddings_by_domain=text_embeddings_by_domain,
+        language_guided_temperature=cfg.language_guided_temperature,
+    )
     best_checkpoint = torch.load(out_dir / "best.pt", map_location="cpu")
     best_metrics = best_checkpoint.get("metrics", {})
     print("\nTraining finished")

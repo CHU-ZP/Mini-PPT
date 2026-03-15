@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "minippt"
-version = "0.3.0"
-description = "A minimal PPT-inspired two-dataset point cloud classification prototype with optional language-guided semantic alignment."
+version = "0.4.0"
+description = "A minimal PPT-inspired two-dataset point cloud classification prototype with switchable decoupled or lightweight language-guided heads."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -81,8 +81,8 @@ components = [
   "shared lightweight PointNet-style encoder",
   "dataset embedding as domain embedding",
   "Prompt-Driven Normalization (PDNorm)",
-  "decoupled dataset-specific classification heads",
-  "optional frozen-text semantic alignment with dataset-restricted InfoNCE negatives",
+  "switchable decoupled or lightweight language-guided prediction heads",
+  "frozen text prototypes with dataset-restricted InfoNCE-style classification",
 ]
 
 [tool.minippt.exclude]
@@ -109,8 +109,7 @@ default_num_points = 1024
 
 [tool.minippt.model]
 backbone = "lightweight PointNet-style encoder"
-head = "decoupled MLP classifiers"
-optional_semantic_branch = "projection head to frozen text embedding space"
+head = "switchable decoupled MLP heads or a lightweight language-guided prototype head"
 
 [tool.minippt.model.domain_embedding]
 enabled = true
@@ -127,7 +126,7 @@ expected_usage = [
 
 [tool.minippt.training]
 optimizer = "Adam"
-loss = "CrossEntropyLoss"
+loss = "CrossEntropyLoss on dataset-specific logits; for the language-guided head the logits come from text-prototype similarity restricted to the current dataset"
 checkpointing = true
 save_logs = true
 save_curves = true
@@ -151,9 +150,8 @@ dropout = 0.3
 embedding_dim = 16
 num_workers = 4
 amp = true
-semantic_alignment = false
-semantic_weight = 0.2
-semantic_temperature = 0.07
+head_type = "decoupled"
+language_guided_temperature = 0.07
 text_model_name = "sentence-transformers/all-MiniLM-L6-v2"
 
 [tool.minippt.evaluation]
@@ -206,11 +204,13 @@ architecture_rule = "Do not over-engineer or turn the project into a general-pur
 recommended_order = [
   "train_modelnet_only",
   "train_scanobjectnn_only",
-  "train_joint_naive",
-  "train_joint_pdnorm",
+  "train_joint_naive + head_type=decoupled",
+  "train_joint_pdnorm + head_type=decoupled",
+  "train_joint_naive + head_type=language_guided",
+  "train_joint_pdnorm + head_type=language_guided",
 ]
 presentation_story = [
   "first show that ModelNet40 and ScanObjectNN differ in difficulty",
-  "then show the naive joint-training baseline",
-  "finally compare it against PDNorm-based joint training",
+  "then compare decoupled heads against a true lightweight language-guided head",
+  "finally compare naive joint training against PDNorm within each prediction-head choice",
 ]

@@ -3,10 +3,10 @@ import argparse
 import torch
 from torch.utils.data import DataLoader
 
-from config import ExperimentConfig, canonical_mode, use_pdnorm
+from config import ExperimentConfig, canonical_mode, use_pdnorm, uses_language_guided_head
 from dataset import build_datasets, collate_point_cloud_batch
 from model import PointNetClassifier
-from train import evaluate_loader
+from train import build_text_prototypes, evaluate_loader
 from utils import choose_device
 
 
@@ -43,7 +43,7 @@ def main():
     args = build_parser().parse_args()
     checkpoint = torch.load(args.checkpoint, map_location="cpu")
     cfg_dict = checkpoint["config"]
-    cfg = ExperimentConfig(**cfg_dict)
+    cfg = ExperimentConfig.from_dict(cfg_dict)
     cfg.mode = canonical_mode(cfg.mode)
     cfg.modelnet_root = args.modelnet_root
     cfg.scanobjectnn_root = args.scanobjectnn_root
@@ -51,7 +51,7 @@ def main():
     device = choose_device(cfg.device)
     domain_num_classes = checkpoint.get("domain_num_classes")
     if domain_num_classes is None:
-        raise KeyError("Checkpoint is missing `domain_num_classes`. Please re-train with the decoupled version.")
+        raise KeyError("Checkpoint is missing `domain_num_classes`. Please re-train with the current multi-dataset format.")
 
     model = PointNetClassifier(
         num_classes_by_domain=[
@@ -61,11 +61,25 @@ def main():
         emb_dim=cfg.emb_dim,
         use_pdnorm=use_pdnorm(cfg.mode),
         dropout=cfg.dropout,
-        use_semantic_alignment=cfg.semantic_alignment,
-        semantic_embedding_dim=cfg.semantic_embedding_dim,
+        head_type=cfg.head_type,
+        text_embedding_dim=cfg.text_embedding_dim,
     ).to(device)
     model.load_state_dict(checkpoint["model_state"])
     model.eval()
+
+    text_embeddings_by_domain = checkpoint.get("text_embeddings_by_domain")
+    if text_embeddings_by_domain is not None:
+        text_embeddings_by_domain = {
+            int(domain_idx): embeddings.float() for domain_idx, embeddings in text_embeddings_by_domain.items()
+        }
+    elif uses_language_guided_head(cfg.head_type):
+        domain_class_names = checkpoint.get("domain_class_names")
+        if domain_class_names is None:
+            raise KeyError(
+                "Checkpoint is missing both `text_embeddings_by_domain` and `domain_class_names`, "
+                "so the language-guided head cannot be evaluated."
+            )
+        text_embeddings_by_domain, _ = build_text_prototypes(cfg, domain_class_names)
 
     datasets = build_datasets(
         modelnet_root=cfg.modelnet_root,
@@ -94,6 +108,9 @@ def main():
             loader,
             device,
             use_amp=bool(getattr(cfg, "amp", False) and device.type == "cuda"),
+            head_type=cfg.head_type,
+            text_embeddings_by_domain=text_embeddings_by_domain,
+            language_guided_temperature=cfg.language_guided_temperature,
         )
 
     if len(metrics) > 1:
@@ -101,7 +118,7 @@ def main():
 
     print(f"Checkpoint: {args.checkpoint}")
     print(f"Mode: {cfg.mode}")
-    print(f"Semantic alignment: {cfg.semantic_alignment}")
+    print(f"Head type: {cfg.head_type}")
     for name, value in metrics.items():
         print(f"{name}: {value:.4f}")
 
