@@ -51,7 +51,6 @@ def args_to_config(args):
         seed=cfg.seed,
         cache_data=cfg.cache_data,
         device=cfg.device,
-        scanobjectnn_variant=cfg.scanobjectnn_variant,
         amp=args.amp,
         head_type=args.head_type,
         text_embedding_dim=cfg.text_embedding_dim,
@@ -182,13 +181,13 @@ def train_one_epoch(
 
         optimizer.zero_grad(set_to_none=True)
         with get_autocast_context(device, use_amp):
-            outputs = model.forward_outputs(
+            logits_by_domain = model(
                 points,
                 domain_ids,
                 text_embeddings_by_domain=text_embeddings_by_domain if uses_language_guided_head(head_type) else None,
                 temperature=language_guided_temperature,
             )
-            cls_loss = classification_cross_entropy(outputs["logits_by_domain"], labels, domain_ids, criterion)
+            cls_loss = classification_cross_entropy(logits_by_domain, labels, domain_ids, criterion)
             loss = cls_loss
         scaler.scale(loss).backward()
         scaler.step(optimizer)
@@ -217,13 +216,12 @@ def evaluate_loader(
         domain_ids = domain_ids.to(device, non_blocking=True)
 
         with get_autocast_context(device, use_amp):
-            outputs = model.forward_outputs(
+            logits_by_domain = model(
                 points,
                 domain_ids,
                 text_embeddings_by_domain=text_embeddings_by_domain if uses_language_guided_head(head_type) else None,
                 temperature=language_guided_temperature,
             )
-            logits_by_domain = outputs["logits_by_domain"]
         for domain_idx, logits in logits_by_domain.items():
             mask = domain_ids == int(domain_idx)
             domain_labels = labels[mask]

@@ -34,11 +34,6 @@ def seed_everything(seed: int):
     torch.cuda.manual_seed_all(seed)
 
 
-def accuracy_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> float:
-    preds = logits.argmax(dim=1)
-    return (preds == labels).float().mean().item()
-
-
 def save_json(data, path):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -57,8 +52,6 @@ def plot_history(history: dict, save_path):
     fig, axes = plt.subplots(1, 2, figsize=(11, 4))
 
     axes[0].plot(epochs, history["train_loss"], label="train loss", color="#1f77b4")
-    if "semantic_loss" in history and len(history["semantic_loss"]) == len(epochs):
-        axes[0].plot(epochs, history["semantic_loss"], label="semantic loss", color="#9467bd")
     axes[0].set_xlabel("epoch")
     axes[0].set_ylabel("loss")
     axes[0].set_title("Training Loss")

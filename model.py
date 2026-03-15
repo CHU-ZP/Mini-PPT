@@ -148,48 +148,30 @@ class PointNetClassifier(nn.Module):
             logits_by_domain[int(domain_idx)] = logits / temperature
         return logits_by_domain
 
-    def forward_outputs(
-        self,
-        points: torch.Tensor,
-        domain_ids: torch.Tensor,
-        text_embeddings_by_domain: dict[int, torch.Tensor] | None = None,
-        temperature: float = 1.0,
-    ):
-        if domain_ids is None:
-            raise ValueError("domain_ids are required for dataset-aware prediction heads.")
-
-        features = self.forward_features(points, domain_ids)
-        outputs = {
-            "features": features,
-        }
-
-        if self.head_type == "decoupled":
-            logits_by_domain = {}
-            for domain_idx in torch.unique(domain_ids).tolist():
-                mask = domain_ids == int(domain_idx)
-                logits_by_domain[int(domain_idx)] = self.heads[int(domain_idx)](features[mask])
-            outputs["logits_by_domain"] = logits_by_domain
-        else:
-            language_features = self.language_guided_head(features)
-            outputs["language_features"] = language_features
-            if text_embeddings_by_domain is not None:
-                outputs["logits_by_domain"] = self.build_language_guided_logits(
-                    language_features,
-                    domain_ids,
-                    text_embeddings_by_domain=text_embeddings_by_domain,
-                    temperature=temperature,
-                )
-        return outputs
-
     def forward(
         self,
         points: torch.Tensor,
         domain_ids: torch.Tensor,
         text_embeddings_by_domain: dict[int, torch.Tensor] | None = None,
         temperature: float = 1.0,
-    ):
-        return self.forward_outputs(
-            points,
+    ) -> dict[int, torch.Tensor]:
+        if domain_ids is None:
+            raise ValueError("domain_ids are required for dataset-aware prediction heads.")
+
+        features = self.forward_features(points, domain_ids)
+        if self.head_type == "decoupled":
+            logits_by_domain = {}
+            for domain_idx in torch.unique(domain_ids).tolist():
+                mask = domain_ids == int(domain_idx)
+                logits_by_domain[int(domain_idx)] = self.heads[int(domain_idx)](features[mask])
+            return logits_by_domain
+
+        if text_embeddings_by_domain is None:
+            raise ValueError("text_embeddings_by_domain are required when using the language-guided head.")
+
+        language_features = self.language_guided_head(features)
+        return self.build_language_guided_logits(
+            language_features,
             domain_ids,
             text_embeddings_by_domain=text_embeddings_by_domain,
             temperature=temperature,
