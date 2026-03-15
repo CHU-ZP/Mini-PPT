@@ -1,0 +1,206 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "minippt"
+version = "0.3.0"
+description = "A minimal PPT-inspired two-dataset point cloud classification prototype for course projects."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Course Project Team" },
+]
+keywords = [
+  "3d",
+  "point-cloud",
+  "pointnet",
+  "domain-adaptation",
+  "pdnorm",
+  "ppt",
+  "modelnet40",
+  "scanobjectnn",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Education",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "torch",
+  "numpy",
+  "tqdm",
+  "matplotlib",
+]
+
+[project.optional-dependencies]
+preprocess = [
+  "h5py",
+]
+
+[project.urls]
+Paper = "https://arxiv.org/abs/2308.09718"
+
+[project.scripts]
+minippt-train = "train:main"
+minippt-eval = "eval:main"
+minippt-prepare-data = "prepare_data:main"
+
+[tool.setuptools]
+py-modules = ["config", "dataset", "model", "train", "eval", "utils", "prepare_data"]
+include-package-data = false
+
+[tool.minippt]
+language = "en"
+project_type = "minimal runnable two-dataset course prototype"
+inspiration = "Towards Large-scale 3D Representation Learning with Multi-dataset Point Prompt Training (PPT)"
+main_goal = "Evaluate whether domain-conditioned normalization improves joint training stability or effectiveness under real dataset shift between ModelNet40 and ScanObjectNN."
+stage = "phase_1_two_dataset"
+hardware_target = "single NVIDIA RTX 4060 laptop GPU"
+design_priority = "Keep the code small, clear, runnable, and presentation-friendly."
+
+[tool.minippt.scope]
+task = "3D point cloud classification"
+datasets = ["ModelNet40", "ScanObjectNN"]
+input_features = ["xyz"]
+use_normals = false
+label_space = "dataset-specific label spaces"
+
+[tool.minippt.keep]
+components = [
+  "shared lightweight PointNet-style encoder",
+  "dataset embedding as domain embedding",
+  "Prompt-Driven Normalization (PDNorm)",
+  "decoupled dataset-specific classification heads",
+]
+
+[tool.minippt.exclude]
+components = [
+  "CLIP",
+  "language-guided categorical alignment",
+  "large-scale multi-dataset semantic segmentation",
+  "Pointcept-style heavy framework design",
+  "full paper reproduction",
+]
+
+[tool.minippt.domains]
+count = 2
+construction = "Use two real datasets as two domains."
+
+[tool.minippt.domains.domain_a]
+name = "modelnet40"
+role = "synthetic CAD domain"
+default_num_points = 1024
+
+[tool.minippt.domains.domain_b]
+name = "scanobjectnn"
+role = "real scanned object domain"
+default_num_points = 1024
+
+[tool.minippt.model]
+backbone = "lightweight PointNet-style encoder"
+head = "decoupled MLP classifiers"
+
+[tool.minippt.model.domain_embedding]
+enabled = true
+input = "dataset id"
+output = "small learned embedding"
+
+[tool.minippt.model.pdnorm]
+enabled = true
+definition = "Normalize intermediate features first, then predict affine scale and affine bias from the dataset embedding, and finally modulate the normalized features with the generated scale and bias."
+expected_usage = [
+  "enabled in train_joint_pdnorm",
+  "disabled in train_joint_naive",
+]
+
+[tool.minippt.training]
+optimizer = "Adam"
+loss = "CrossEntropyLoss"
+checkpointing = true
+save_logs = true
+save_curves = true
+command_line_configurable = true
+
+[tool.minippt.training.modes]
+supported = [
+  "train_modelnet_only",
+  "train_scanobjectnn_only",
+  "train_joint_naive",
+  "train_joint_pdnorm",
+]
+
+[tool.minippt.training.defaults]
+batch_size = 64
+epochs = 20
+num_points = 512
+learning_rate = 0.001
+weight_decay = 0.0001
+dropout = 0.3
+embedding_dim = 16
+num_workers = 4
+amp = true
+
+[tool.minippt.evaluation]
+required_metrics = [
+  "train loss",
+  "validation accuracy",
+  "best accuracy",
+  "validation accuracy on ModelNet40",
+  "validation accuracy on ScanObjectNN",
+]
+
+[tool.minippt.io]
+required_source_files = [
+  "README.md",
+  "config.py",
+  "dataset.py",
+  "model.py",
+  "prepare_data.py",
+  "train.py",
+  "eval.py",
+  "utils.py",
+]
+runtime_artifacts = [
+  "config.json",
+  "history.json",
+  "summary.json",
+  "curves.png",
+  "last.pt",
+  "best.pt",
+]
+
+[tool.minippt.constraints]
+allowed_dependencies = [
+  "torch",
+  "numpy",
+  "tqdm",
+  "matplotlib",
+]
+optional_preprocessing_dependency = "h5py"
+forbidden_frameworks = [
+  "pytorch-lightning",
+  "hydra",
+  "mmcv",
+  "pointcept",
+]
+architecture_rule = "Do not over-engineer or turn the project into a general-purpose framework."
+
+[tool.minippt.experiments]
+recommended_order = [
+  "train_modelnet_only",
+  "train_scanobjectnn_only",
+  "train_joint_naive",
+  "train_joint_pdnorm",
+]
+presentation_story = [
+  "first show that ModelNet40 and ScanObjectNN differ in difficulty",
+  "then show the naive joint-training baseline",
+  "finally compare it against PDNorm-based joint training",
+]
