@@ -43,6 +43,10 @@ dependencies = [
 preprocess = [
   "h5py",
 ]
+text = [
+  "sentence-transformers",
+  "umap-learn",
+]
 
 [project.urls]
 Paper = "https://arxiv.org/abs/2308.09718"
@@ -53,7 +57,7 @@ minippt-eval = "eval:main"
 minippt-prepare-data = "prepare_data:main"
 
 [tool.setuptools]
-py-modules = ["config", "dataset", "model", "train", "eval", "utils", "prepare_data"]
+py-modules = ["config", "dataset", "model", "train", "eval", "utils", "prepare_data", "text_encoder"]
 include-package-data = false
 
 [tool.minippt]
@@ -184,6 +188,7 @@ allowed_dependencies = [
   "matplotlib",
 ]
 optional_preprocessing_dependency = "h5py"
+optional_text_dependency = "sentence-transformers"
 forbidden_frameworks = [
   "pytorch-lightning",
   "hydra",

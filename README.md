@@ -118,6 +118,12 @@ If you want to preprocess ScanObjectNN from its official `h5` archive, install t
 uv pip install -e .[preprocess]
 ```
 
+If you want to use the standalone pretrained text embedding module, install:
+
+```bash
+uv pip install -e .[text]
+```
+
 Available commands:
 
 ```bash
@@ -125,6 +131,10 @@ minippt-train --help
 minippt-eval --help
 minippt-prepare-data --help
 ```
+
+Optional module:
+
+- `text_encoder.py`: a standalone frozen text embedding wrapper for future semantic alignment experiments
 
 The training CLI intentionally keeps only the parameters you are likely to change during coursework:
 
@@ -136,6 +146,39 @@ The training CLI intentionally keeps only the parameters you are likely to chang
 - experiment name
 
 Learning rate, workers, dropout, AMP default, and output directory are fixed in [config.py](/home/zepeng/Obsidian/ComputerScience/2MVA/NPM3d/miniPPT/config.py#L23).
+
+## Optional Text Embeddings
+
+The repo also includes a standalone pretrained text embedding wrapper in [text_encoder.py](/home/zepeng/Obsidian/ComputerScience/2MVA/NPM3d/miniPPT/text_encoder.py#L1). It does not change the current classifier, training loop, or checkpoints unless you explicitly import and use it.
+
+Example:
+
+```python
+from text_encoder import FrozenTextEmbedder
+
+encoder = FrozenTextEmbedder()
+embeddings = encoder.encode(["chair", "table", "display"])
+print(embeddings.shape)
+```
+
+You can also encode all dataset labels at once:
+
+```python
+from dataset import build_datasets
+from text_encoder import FrozenTextEmbedder
+
+datasets = build_datasets("data/modelnet40_princeton_npy", "data/scanobjectnn_npy", num_points=1024)
+encoder = FrozenTextEmbedder()
+label_embeddings = encoder.encode_domains(datasets["domain_class_names"])
+```
+
+To quickly visualize the encoded class names with UMAP:
+
+```bash
+uv run python text_encoder.py \
+  --device cpu \
+  --output artifacts/text_embeddings_umap.png
+```
 
 ## Dataset Preparation
 
