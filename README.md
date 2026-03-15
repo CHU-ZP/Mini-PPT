@@ -36,6 +36,86 @@ The goal is to test whether the following choices help multi-dataset joint train
 
 The project keeps the code short and runnable on a single RTX 4060 laptop GPU.
 
+## Technical Design
+
+### Backbone
+
+The model uses a lightweight **PointNet-style shared encoder**:
+
+- input: `xyz` only
+- three point-wise blocks: `3 -> 64 -> 128 -> 256`
+- `1x1 Conv + Norm + ReLU`
+- global max pooling for the final shape feature
+
+This is intentionally much smaller than the original Pointcept/PPT setup.
+
+### Domain Prompt / PDNorm
+
+`PDNorm` is implemented as a lightweight domain-conditioned normalization layer:
+
+- first normalize the intermediate feature with `InstanceNorm1d(affine=False)`
+- then use a learned dataset embedding as a domain embedding
+- predict channel-wise affine `scale` and `bias` from the domain embedding
+- modulate the normalized feature with the predicted affine parameters
+
+In this repo, the domain embedding is simply the dataset id:
+
+- `ModelNet40`
+- `ScanObjectNN`
+
+### Prediction Heads
+
+The repo supports two prediction-space strategies.
+
+`decoupled`
+- one classifier head for `ModelNet40`
+- one classifier head for `ScanObjectNN`
+- each sample is routed to the head of its own dataset
+
+`language_guided`
+- no dataset-specific classifier heads
+- a shared projection head maps 3D features into a frozen text embedding space
+- classification is performed by similarity to class text prototypes from the current dataset
+
+### Language Encoder
+
+The lightweight language-guided implementation uses a **frozen pretrained text encoder**:
+
+- model: `sentence-transformers/all-MiniLM-L6-v2`
+- text prompts are built from class names with the template:
+  - `a 3d point cloud of a {}`
+- text embeddings are cached locally and reused during training and evaluation
+
+This is a lightweight substitute for the full language-guided alignment idea in the paper.
+
+### Loss
+
+For `decoupled`, training uses standard classification cross-entropy on dataset-specific logits.
+
+For `language_guided`, logits are built from:
+
+- normalized 3D projected features
+- normalized text prototypes
+- temperature-scaled dot-product similarity
+
+The loss is implemented as **InfoNCE-style cross-entropy** over these similarities.
+Negative classes are restricted to the **current dataset label space only**, which matches the intended multi-dataset setting.
+
+### Methods Compared
+
+The main comparison in this repo is:
+
+- single-dataset training
+- joint training with `decoupled` heads
+- joint training with `decoupled + PDNorm`
+- joint training with `language_guided`
+- joint training with `language_guided + PDNorm`
+
+So in this project:
+
+- `train_joint_naive` vs `train_joint_pdnorm` controls whether `PDNorm` is used
+- `--head_type decoupled` vs `--head_type language_guided` controls the prediction-space strategy
+
 ## Installation
 
 ```bash
