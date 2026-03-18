@@ -9,7 +9,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-ROOT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = Path(__file__).resolve().parents[1]
 RUNS_DIR = ROOT_DIR / "runs"
 RESULTS_DIR = ROOT_DIR / "results"
 
@@ -36,10 +36,10 @@ def display_method_name(method_name: str) -> str:
     mapping = {
         "single_modelnet40": "Single ModelNet40",
         "single_scanobjectnn": "Single ScanObjectNN",
-        "joint_decoupled": "Joint Decoupled",
-        "joint_decoupled_pdnorm": "Joint Decoupled + PDNorm",
-        "joint_language_guided": "Joint Language-guided",
-        "joint_language_guided_pdnorm": "Joint Language-guided + PDNorm",
+        "joint_decoupled": "Decoupled + Naive",
+        "joint_decoupled_pdnorm": "Decoupled + PDNorm",
+        "joint_language_guided": "Language-guided + Naive",
+        "joint_language_guided_pdnorm": "Language-guided + PDNorm",
     }
     return mapping[method_name]
 
@@ -148,8 +148,14 @@ def plot_grouped_dataset_bars(rows: list[dict]):
         ax.bar(x + bar_width / 2, scan_values, width=bar_width, label="ScanObjectNN", color="#d62728")
         ax.set_xticks(x)
         ax.set_xticklabels(
-            ["Decoupled", "Decoupled\n+ PDNorm", "Language-guided", "Language-guided\n+ PDNorm"],
-            rotation=0,
+            [
+                "Decoupled + Naive",
+                "Decoupled + PDNorm",
+                "Language-guided + Naive",
+                "Language-guided + PDNorm",
+            ],
+            rotation=18,
+            ha="right",
         )
         ax.set_ylim(0.55, 0.9)
         ax.set_title(backbone.upper())
@@ -171,7 +177,12 @@ def plot_mean_accuracy(rows: list[dict]):
         "joint_language_guided",
         "joint_language_guided_pdnorm",
     ]
-    labels = ["Decoupled", "Decoupled + PDNorm", "Language-guided", "Language-guided + PDNorm"]
+    labels = [
+        "Decoupled + Naive",
+        "Decoupled + PDNorm",
+        "Language-guided + Naive",
+        "Language-guided + PDNorm",
+    ]
 
     pointnet_values = [lookup[("pointnet", method)]["best_acc"] for method in methods]
     dgcnn_values = [lookup[("dgcnn", method)]["best_acc"] for method in methods]
@@ -183,7 +194,7 @@ def plot_mean_accuracy(rows: list[dict]):
     ax.bar(x - width / 2, pointnet_values, width=width, label="PointNet", color="#2ca02c")
     ax.bar(x + width / 2, dgcnn_values, width=width, label="DGCNN", color="#9467bd")
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=10, ha="right")
+    ax.set_xticklabels(labels, rotation=22, ha="right")
     ax.set_ylabel("Mean Accuracy")
     ax.set_ylim(0.68, 0.84)
     ax.set_title("Mean Accuracy Across Joint Methods")
@@ -202,7 +213,12 @@ def plot_gap_to_single(rows: list[dict]):
         "joint_language_guided",
         "joint_language_guided_pdnorm",
     ]
-    labels = ["Decoupled", "Decoupled + PDNorm", "Language-guided", "Language-guided + PDNorm"]
+    labels = [
+        "Decoupled + Naive",
+        "Decoupled + PDNorm",
+        "Language-guided + Naive",
+        "Language-guided + PDNorm",
+    ]
     backbones = ["pointnet", "dgcnn"]
 
     fig, axes = plt.subplots(1, 2, figsize=(13, 5), sharey=True)
@@ -220,7 +236,7 @@ def plot_gap_to_single(rows: list[dict]):
         ax.bar(x - width / 2, modelnet_gaps, width=width, label="ModelNet40 gap", color="#ff7f0e")
         ax.bar(x + width / 2, scan_gaps, width=width, label="ScanObjectNN gap", color="#17becf")
         ax.set_xticks(x)
-        ax.set_xticklabels(labels, rotation=10, ha="right")
+        ax.set_xticklabels(labels, rotation=22, ha="right")
         ax.set_title(backbone.upper())
         ax.set_ylabel("Joint Acc - Single-dataset Acc")
         ax.grid(True, axis="y", linestyle="--", alpha=0.3)
