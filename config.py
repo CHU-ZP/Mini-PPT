@@ -9,6 +9,10 @@ HEAD_TYPES = (
     "decoupled",
     "language_guided",
 )
+BACKBONE_TYPES = (
+    "pointnet",
+    "dgcnn",
+)
 MODES = (
     "train_modelnet_only",
     "train_scanobjectnn_only",
@@ -37,6 +41,8 @@ class ExperimentConfig:
     cache_data: bool = False
     device: str = "cuda"
     amp: bool = True
+    backbone_type: str = "pointnet"
+    dgcnn_k: int = 20
     head_type: str = "decoupled"
     text_embedding_dim: int = 384
     language_guided_temperature: float = 0.07
@@ -71,6 +77,8 @@ def default_run_name(cfg: ExperimentConfig) -> str:
     mode = canonical_mode(cfg.mode)
     if cfg.exp_name:
         return cfg.exp_name
+    if cfg.backbone_type != "pointnet":
+        mode = f"{mode}_{cfg.backbone_type}"
     if cfg.head_type != "decoupled":
         mode = f"{mode}_{cfg.head_type}"
     return f"{mode}_pts{cfg.num_points}_bs{cfg.batch_size}_ep{cfg.epochs}_seed{cfg.seed}"

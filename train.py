@@ -11,7 +11,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from config import HEAD_TYPES, ExperimentConfig, MODES, canonical_mode, default_run_name, use_pdnorm, uses_language_guided_head
+from config import BACKBONE_TYPES, HEAD_TYPES, ExperimentConfig, MODES, canonical_mode, default_run_name, use_pdnorm, uses_language_guided_head
 from dataset import DOMAIN_TO_ID, build_datasets, collate_point_cloud_batch
 from model import PointNetClassifier
 from utils import AverageMeter, choose_device, plot_history, prepare_output_dir, save_json, seed_everything
@@ -26,6 +26,7 @@ def build_parser():
     parser.add_argument("--epochs", type=int, default=cfg.epochs)
     parser.add_argument("--batch_size", type=int, default=cfg.batch_size)
     parser.add_argument("--num_points", type=int, default=cfg.num_points)
+    parser.add_argument("--backbone_type", type=str, choices=BACKBONE_TYPES, default=cfg.backbone_type)
     parser.add_argument("--head_type", type=str, choices=HEAD_TYPES, default=cfg.head_type)
     parser.add_argument("--no_amp", dest="amp", action="store_false")
     parser.add_argument("--exp_name", type=str, default=cfg.exp_name)
@@ -52,6 +53,8 @@ def args_to_config(args):
         cache_data=cfg.cache_data,
         device=cfg.device,
         amp=args.amp,
+        backbone_type=args.backbone_type,
+        dgcnn_k=cfg.dgcnn_k,
         head_type=args.head_type,
         text_embedding_dim=cfg.text_embedding_dim,
         language_guided_temperature=cfg.language_guided_temperature,
@@ -313,6 +316,8 @@ def main():
         use_pdnorm=use_pdnorm(cfg.mode),
         dropout=cfg.dropout,
         num_domains=len(DOMAIN_TO_ID),
+        backbone_type=cfg.backbone_type,
+        dgcnn_k=cfg.dgcnn_k,
         head_type=cfg.head_type,
         text_embedding_dim=cfg.text_embedding_dim,
     ).to(device)

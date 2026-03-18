@@ -1,0 +1,7 @@
+exp_name,report_name,mode,head_type,best_epoch,best_acc,modelnet_acc,scanobjectnn_acc,checkpoint
+benchmark_single_modelnet40,Single-dataset training on ModelNet40,train_modelnet_only,decoupled,43,0.8075,0.8075,,/home/zepeng/Obsidian/ComputerScience/2MVA/NPM3d/miniPPT/runs/benchmark_single_modelnet40/best.pt
+benchmark_single_scanobjectnn,Single-dataset training on ScanObjectNN,train_scanobjectnn_only,decoupled,49,0.6617,,0.6617,/home/zepeng/Obsidian/ComputerScience/2MVA/NPM3d/miniPPT/runs/benchmark_single_scanobjectnn/best.pt
+benchmark_joint_decoupled,"Multi-dataset joint training, Decoupled",train_joint_naive,decoupled,48,0.7346,0.8055,0.6638,/home/zepeng/Obsidian/ComputerScience/2MVA/NPM3d/miniPPT/runs/benchmark_joint_decoupled/best.pt
+benchmark_joint_decoupled_pdnorm,"Multi-dataset joint training, Decoupled + PDNorm",train_joint_pdnorm,decoupled,42,0.7452,0.8213,0.6690,/home/zepeng/Obsidian/ComputerScience/2MVA/NPM3d/miniPPT/runs/benchmark_joint_decoupled_pdnorm/best.pt
+benchmark_joint_language_guided,"Multi-dataset joint training, Lightweight Language-guided Categorical Alignment",train_joint_naive,language_guided,44,0.7280,0.7909,0.6652,/home/zepeng/Obsidian/ComputerScience/2MVA/NPM3d/miniPPT/runs/benchmark_joint_language_guided/best.pt
+benchmark_joint_language_guided_pdnorm,"Multi-dataset joint training, Lightweight Language-guided Categorical Alignment + PDNorm",train_joint_pdnorm,language_guided,49,0.7446,0.8229,0.6662,/home/zepeng/Obsidian/ComputerScience/2MVA/NPM3d/miniPPT/runs/benchmark_joint_language_guided_pdnorm/best.pt

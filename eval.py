@@ -61,6 +61,8 @@ def main():
         emb_dim=cfg.emb_dim,
         use_pdnorm=use_pdnorm(cfg.mode),
         dropout=cfg.dropout,
+        backbone_type=cfg.backbone_type,
+        dgcnn_k=cfg.dgcnn_k,
         head_type=cfg.head_type,
         text_embedding_dim=cfg.text_embedding_dim,
     ).to(device)
@@ -118,6 +120,7 @@ def main():
 
     print(f"Checkpoint: {args.checkpoint}")
     print(f"Mode: {cfg.mode}")
+    print(f"Backbone: {cfg.backbone_type}")
     print(f"Head type: {cfg.head_type}")
     for name, value in metrics.items():
         print(f"{name}: {value:.4f}")

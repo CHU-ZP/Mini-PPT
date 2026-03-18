@@ -16,6 +16,7 @@ keywords = [
   "3d",
   "point-cloud",
   "pointnet",
+  "dgcnn",
   "domain-adaptation",
   "pdnorm",
   "ppt",
@@ -108,7 +109,7 @@ role = "real scanned object domain"
 default_num_points = 1024
 
 [tool.minippt.model]
-backbone = "lightweight PointNet-style encoder"
+backbone = "switchable lightweight PointNet-style or DGCNN-style encoder"
 head = "switchable decoupled MLP heads or a lightweight language-guided prototype head"
 
 [tool.minippt.model.domain_embedding]
@@ -141,6 +142,7 @@ supported = [
 ]
 
 [tool.minippt.training.defaults]
+backbone_type = "pointnet"
 batch_size = 128
 epochs = 50
 num_points = 1024

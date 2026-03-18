@@ -14,7 +14,9 @@ This repository is **not** a reproduction of the full paper or the full Pointcep
 - two datasets as two domains:
   - `ModelNet40`
   - `ScanObjectNN`
-- a lightweight PointNet-style shared encoder
+- two backbone choices:
+  - `pointnet`
+  - `dgcnn`
 - optional `PDNorm`
 - two prediction-space choices:
   - `decoupled`
@@ -40,14 +42,22 @@ The project keeps the code short and runnable on a single RTX 4060 laptop GPU.
 
 ### Backbone
 
-The model uses a lightweight **PointNet-style shared encoder**:
+The repo now supports two backbone choices.
 
+`pointnet`
+- lightweight PointNet-style shared encoder
 - input: `xyz` only
 - three point-wise blocks: `3 -> 64 -> 128 -> 256`
 - `1x1 Conv + Norm + ReLU`
 - global max pooling for the final shape feature
 
-This is intentionally much smaller than the original Pointcept/PPT setup.
+`dgcnn`
+- a lightweight DGCNN-style alternative
+- dynamic graph feature extraction with kNN-based EdgeConv blocks
+- channel progression: `3 -> 64 -> 64 -> 128 -> 256`
+- multi-scale feature concatenation followed by a fusion block and global max pooling
+
+The default remains `pointnet`. `dgcnn` is provided as a stronger alternative backbone.
 
 ### Domain Prompt / PDNorm
 
@@ -62,6 +72,11 @@ In this repo, the domain embedding is simply the dataset id:
 
 - `ModelNet40`
 - `ScanObjectNN`
+
+The same idea is reused for both backbones:
+
+- in `pointnet`, PDNorm is applied after each point-wise block
+- in `dgcnn`, PDNorm is applied after each EdgeConv block and after the fusion block
 
 ### Prediction Heads
 
@@ -177,6 +192,12 @@ uv run minippt-train --mode train_joint_naive --head_type decoupled
 uv run minippt-train --mode train_joint_pdnorm --head_type decoupled
 ```
 
+Use DGCNN instead of the default PointNet backbone:
+
+```bash
+uv run minippt-train --mode train_joint_pdnorm --backbone_type dgcnn --head_type decoupled
+```
+
 Joint training with the lightweight `language_guided` head:
 
 ```bash
@@ -196,12 +217,21 @@ Run the full benchmark suite:
 ./run_all_experiments.sh
 ```
 
+Run the same benchmark with DGCNN:
+
+```bash
+BACKBONE_TYPE=dgcnn ./run_all_experiments.sh
+```
+
 ## Default Training Setup
 
+- `backbone_type=pointnet`
 - `epochs=50`
 - `batch_size=128`
 - `num_points=1024`
 - `learning_rate=2e-3`
+
+For `dgcnn`, a smaller batch size is usually more realistic than the default PointNet setting.
 
 ## Outputs
 

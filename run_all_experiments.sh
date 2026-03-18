@@ -9,6 +9,7 @@ SCANOBJECTNN_ROOT="${SCANOBJECTNN_ROOT:-$ROOT_DIR/data/scanobjectnn_npy}"
 EPOCHS="${EPOCHS:-50}"
 BATCH_SIZE="${BATCH_SIZE:-128}"
 NUM_POINTS="${NUM_POINTS:-1024}"
+BACKBONE_TYPE="${BACKBONE_TYPE:-pointnet}"
 RUN_PREFIX="${RUN_PREFIX:-benchmark}"
 FORCE="${FORCE:-0}"
 
@@ -33,7 +34,7 @@ fi
 RESULTS_TSV="$(mktemp)"
 trap 'rm -f "$RESULTS_TSV"' EXIT
 
-printf "exp_name\treport_name\tmode\thead_type\tbest_epoch\tbest_acc\tmodelnet_acc\tscanobjectnn_acc\tcheckpoint\n" > "$RESULTS_TSV"
+printf "exp_name\treport_name\tmode\tbackbone_type\thead_type\tbest_epoch\tbest_acc\tmodelnet_acc\tscanobjectnn_acc\tcheckpoint\n" > "$RESULTS_TSV"
 
 EXPERIMENTS=(
   "single_modelnet40|Single-dataset training on ModelNet40|train_modelnet_only|decoupled"
@@ -50,19 +51,20 @@ run_experiment() {
   local mode="$3"
   local head_type="$4"
 
-  local exp_name="${RUN_PREFIX}_${exp_key}"
+  local exp_name="${RUN_PREFIX}_${BACKBONE_TYPE}_${exp_key}"
   local run_dir="$ROOT_DIR/runs/$exp_name"
   local checkpoint_path="$run_dir/best.pt"
 
   echo
   echo "==> $report_name"
-  echo "    mode=$mode | head_type=$head_type | exp_name=$exp_name"
+  echo "    mode=$mode | backbone_type=$BACKBONE_TYPE | head_type=$head_type | exp_name=$exp_name"
 
   if [[ "$FORCE" == "1" || ! -f "$checkpoint_path" ]]; then
     uv run minippt-train \
       --modelnet_root "$MODELNET_ROOT" \
       --scanobjectnn_root "$SCANOBJECTNN_ROOT" \
       --mode "$mode" \
+      --backbone_type "$BACKBONE_TYPE" \
       --head_type "$head_type" \
       --epochs "$EPOCHS" \
       --batch_size "$BATCH_SIZE" \
@@ -72,12 +74,12 @@ run_experiment() {
     echo "    skipping training because checkpoint already exists"
   fi
 
-  uv run python - "$checkpoint_path" "$exp_name" "$report_name" "$mode" "$head_type" >> "$RESULTS_TSV" <<'PY'
+  uv run python - "$checkpoint_path" "$exp_name" "$report_name" "$mode" "$BACKBONE_TYPE" "$head_type" >> "$RESULTS_TSV" <<'PY'
 import math
 import sys
 import torch
 
-checkpoint_path, exp_name, report_name, mode, head_type = sys.argv[1:6]
+checkpoint_path, exp_name, report_name, mode, backbone_type, head_type = sys.argv[1:7]
 checkpoint = torch.load(checkpoint_path, map_location="cpu")
 metrics = checkpoint.get("metrics", {})
 epoch = checkpoint.get("epoch", -1)
@@ -97,6 +99,7 @@ print(
             exp_name,
             report_name,
             mode,
+            backbone_type,
             head_type,
             str(epoch),
             fmt(metrics.get("val_acc")),
@@ -114,8 +117,8 @@ for spec in "${EXPERIMENTS[@]}"; do
   run_experiment "$exp_key" "$report_name" "$mode" "$head_type"
 done
 
-CSV_PATH="$ROOT_DIR/runs/${RUN_PREFIX}_results.csv"
-MD_PATH="$ROOT_DIR/runs/${RUN_PREFIX}_results.md"
+CSV_PATH="$ROOT_DIR/runs/${RUN_PREFIX}_${BACKBONE_TYPE}_results.csv"
+MD_PATH="$ROOT_DIR/runs/${RUN_PREFIX}_${BACKBONE_TYPE}_results.md"
 
 uv run python - "$RESULTS_TSV" "$CSV_PATH" "$MD_PATH" <<'PY'
 import csv
@@ -135,6 +138,7 @@ fieldnames = [
     "exp_name",
     "report_name",
     "mode",
+    "backbone_type",
     "head_type",
     "best_epoch",
     "best_acc",
@@ -151,6 +155,7 @@ with csv_path.open("w", encoding="utf-8", newline="") as f:
 header = [
     "Experiment",
     "Mode",
+    "Backbone",
     "Head",
     "Best Epoch",
     "Best Mean Acc",
@@ -174,6 +179,7 @@ for row in rows:
             [
                 row["report_name"],
                 row["mode"],
+                row["backbone_type"],
                 row["head_type"],
                 row["best_epoch"],
                 row["best_acc"],

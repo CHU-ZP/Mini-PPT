@@ -1,0 +1,13 @@
+{
+  "epoch": 50,
+  "best_epoch": 43,
+  "best_acc": 0.8075364667747164,
+  "latest_metrics": {
+    "modelnet": 0.8063209076175041,
+    "val_acc": 0.8063209076175041
+  },
+  "latest_train_stats": {
+    "train_loss": 0.528870400305893
+  },
+  "elapsed_seconds": 175.43799209594727
+}
