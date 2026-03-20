@@ -117,6 +117,50 @@ uv run minippt-prepare-data modelnet40 --archive_path /path/to/ModelNet40.zip --
 uv run minippt-prepare-data scanobjectnn --archive_path /path/to/h5_files.zip --data_root data/scanobjectnn_npy --variant PB_T50_RS --split split1
 ```
 
+## Using Your Own Dataset
+
+The training code can also be used with a custom **object-level point cloud classification** dataset, as long as it is converted to the same simple `npy` layout:
+
+```text
+your_dataset/
+├── train_points.npy
+├── train_labels.npy
+├── test_points.npy
+├── test_labels.npy
+└── class_names.txt
+```
+
+Expected format:
+- `train_points.npy`, `test_points.npy`: shape `[N, P, 3]` or `[N, P, >=3]`
+- only the first 3 channels are used (`xyz`)
+- `train_labels.npy`, `test_labels.npy`: integer labels in `[0, C-1]`
+- `class_names.txt`: one class name per line, in label order
+
+Notes:
+- the repo currently assumes **two domains**
+- the easiest way to use a custom dataset is to replace either `ModelNet40` or `ScanObjectNN` with your own dataset root
+- the preprocessing script is only built for the provided datasets, so custom datasets should be prepared manually into the `npy` format above
+
+Example: use your own dataset as the second domain
+
+```bash
+uv run minippt-train \
+  --modelnet_root data/modelnet40_princeton_npy \
+  --scanobjectnn_root /path/to/your_dataset \
+  --mode train_joint_pdnorm \
+  --head_type decoupled
+```
+
+Example: compare two custom datasets
+
+```bash
+uv run minippt-train \
+  --modelnet_root /path/to/custom_dataset_a \
+  --scanobjectnn_root /path/to/custom_dataset_b \
+  --mode train_joint_naive \
+  --head_type language_guided
+```
+
 ## Main Commands
 
 Single-dataset training:
